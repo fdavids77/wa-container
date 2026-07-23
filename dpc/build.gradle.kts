@@ -17,6 +17,11 @@ android {
 
     signingConfigs {
         getByName("debug") {
+            // Pin to the specific keystore used to sign the build already installed on
+            // the device. The app is installed into Private Space (user 10) and holds
+            // INTERACT_ACROSS_USERS_FULL; a signature mismatch on update requires a full
+            // uninstall/reinstall. The exists() guard lets CI fall back to its own
+            // generated debug key without failing the build.
             val pinned = file("/home/kali/.android/debug.keystore")
             if (pinned.exists()) {
                 storeFile = pinned
