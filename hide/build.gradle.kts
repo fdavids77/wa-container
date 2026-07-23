@@ -17,7 +17,10 @@ android {
 
     signingConfigs {
         getByName("debug") {
-            // default ~/.android/debug.keystore
+            storeFile = file("/home/kali/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
 
