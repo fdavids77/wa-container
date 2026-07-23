@@ -4,6 +4,19 @@ plugins {
 }
 
 android {
+    // Same signing resolution as :dpc — see dpc/build.gradle.kts for full documentation.
+    val ksPath = System.getenv("KEYSTORE_PATH")
+        ?: (findProperty("WA_KEYSTORE_PATH") as String?)
+    val ksPassword = System.getenv("KEYSTORE_PASSWORD")
+        ?: (findProperty("WA_KEYSTORE_PASSWORD") as String?)
+    val ksAlias = System.getenv("KEY_ALIAS")
+        ?: (findProperty("WA_KEY_ALIAS") as String?)
+    val ksKeyPassword = System.getenv("KEY_PASSWORD")
+        ?: (findProperty("WA_KEY_PASSWORD") as String?)
+    val ksFile = ksPath?.let { file(it) }
+    val hasReleaseSigning = ksFile?.exists() == true &&
+        !ksPassword.isNullOrEmpty() && !ksAlias.isNullOrEmpty() && !ksKeyPassword.isNullOrEmpty()
+
     namespace = "com.fdavids77.wahide"
     compileSdk = 35
 
@@ -16,13 +29,12 @@ android {
     }
 
     signingConfigs {
-        getByName("debug") {
-            val pinned = file("/home/kali/.android/debug.keystore")
-            if (pinned.exists()) {
-                storeFile = pinned
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = ksFile
+                storePassword = ksPassword
+                keyAlias = ksAlias
+                keyPassword = ksKeyPassword
             }
         }
     }
@@ -30,7 +42,12 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                println("⚠ wa-container: release keystore not configured — APK will be debug-signed and cannot be installed over a release-signed build")
+                signingConfigs.getByName("debug")
+            }
         }
     }
 

@@ -21,8 +21,28 @@ jobs:
         with:
           gradle-version: 8.11.1
 
+      - name: Decode keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
       - name: Build release APKs
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease
+
+      - name: Print signer digests
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          for apk in \
+            dpc/build/outputs/apk/release/dpc-release.apk \
+            hide/build/outputs/apk/release/hide-release.apk; do
+            echo "=== $apk ==="
+            "$APKSIGNER" verify --print-certs "$apk" | grep -i "sha-256"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
