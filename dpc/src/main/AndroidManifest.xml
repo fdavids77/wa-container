@@ -21,7 +21,7 @@
 
         <activity
             android:name=".LaunchWA"
-            android:label="WA2"
+            android:label="WA3"
             android:theme="@android:style/Theme.NoDisplay"
             android:exported="true">
             <intent-filter>
