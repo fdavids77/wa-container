@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icon foreground — 108 × 108 dp canvas, artwork within inner 66 dp safe zone.
+  White speech-bubble silhouette with a rectangular phone cutout (evenOdd fill rule).
+  The cutout lets the background colour show through, making the icon distinguishable
+  between WA3 (teal) and WA4 (dark-green) by the colour visible inside the phone shape.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="
+            M 24,18
+            L 82,18
+            Q 94,18 94,30
+            L 94,66
+            Q 94,78 82,78
+            L 58,78
+            L 46,92
+            L 46,78
+            L 24,78
+            Q 12,78 12,66
+            L 12,30
+            Q 12,18 24,18
+            Z
+            M 46,30
+            L 64,30
+            Q 66,30 66,32
+            L 66,64
+            Q 66,66 64,66
+            L 46,66
+            Q 44,66 44,64
+            L 44,32
+            Q 44,30 46,30
+            Z" />
+
+</vector>

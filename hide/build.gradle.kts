@@ -17,10 +17,13 @@ android {
 
     signingConfigs {
         getByName("debug") {
-            storeFile = file("/home/kali/.android/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            val pinned = file("/home/kali/.android/debug.keystore")
+            if (pinned.exists()) {
+                storeFile = pinned
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 

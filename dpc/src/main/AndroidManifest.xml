@@ -19,16 +19,53 @@
             </intent-filter>
         </receiver>
 
+        <!-- Shared trampoline implementation. Not a launcher entry itself;
+             launch surfaces are the activity-alias entries below. -->
         <activity
             android:name=".LaunchWA"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:exported="true" />
+
+        <!--
+            Launcher aliases for each clone-profile WhatsApp instance.
+            Each alias reads its target_user_id meta-data at runtime, so adding
+            another instance only requires:
+              1. pm create-user -\-profileOf 0 -\-user-type android.os.usertype.profile.CLONE <name>
+              2. pm install-existing -\-user <id> com.whatsapp
+              3. Add one more <activity-alias> block below with the new id and label.
+        -->
+
+        <activity-alias
+            android:name=".LaunchWA3"
+            android:targetActivity=".LaunchWA"
             android:label="WA3"
+            android:icon="@mipmap/ic_wa3"
             android:theme="@android:style/Theme.NoDisplay"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+            <meta-data
+                android:name="target_user_id"
+                android:value="13" />
+        </activity-alias>
+
+        <activity-alias
+            android:name=".LaunchWA4"
+            android:targetActivity=".LaunchWA"
+            android:label="WA4"
+            android:icon="@mipmap/ic_wa4"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="target_user_id"
+                android:value="11" />
+        </activity-alias>
 
     </application>
 
