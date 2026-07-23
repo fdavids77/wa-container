@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.UserHandle
 import android.util.Log
 import android.widget.Toast
+import java.util.concurrent.TimeUnit
 
 class LaunchWA : Activity() {
 
@@ -23,6 +24,13 @@ class LaunchWA : Activity() {
         super.onCreate(savedInstanceState)
 
         val targetUserId = resolveTargetUserId()
+
+        // Ensure the watcher service is running (no-op if already started).
+        ProfileWatcherService.start(this)
+
+        // Bring the target user up before launching; launching into a stopped user fails.
+        startUserBeforeLaunch(targetUserId)
+
         val launched = tryReflection(targetUserId) || tryRootShell(targetUserId)
 
         if (!launched) {
@@ -44,6 +52,17 @@ class LaunchWA : Activity() {
         } catch (e: Exception) {
             Log.w(TAG, "could not read $META_TARGET_USER from $src, using default $DEFAULT_USER_ID", e)
             DEFAULT_USER_ID
+        }
+    }
+
+    private fun startUserBeforeLaunch(userId: Int) {
+        try {
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "am start-user $userId"))
+            val finished = proc.waitFor(3, TimeUnit.SECONDS)
+            val exit = if (finished) proc.exitValue() else { proc.destroyForcibly(); -1 }
+            Log.i(TAG, "am start-user $userId exit=$exit" + if (!finished) " (timed out)" else "")
+        } catch (t: Throwable) {
+            Log.w(TAG, "am start-user $userId threw", t)
         }
     }
 

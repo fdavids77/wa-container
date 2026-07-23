@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
+        android:minSdkVersion="34" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="@string/app_name"
@@ -19,6 +25,17 @@
             </intent-filter>
         </receiver>
 
+        <!-- Starts ProfileWatcherService after device boot in whatever user context
+             BOOT_COMPLETED fires. In user 0 this keeps the service alive in the
+             primary user so SCREEN_OFF is received even while Private Space is locked. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Shared trampoline implementation. Not a launcher entry itself;
              launch surfaces are the activity-alias entries below. -->
         <activity
@@ -33,6 +50,8 @@
               1. pm create-user -\-profileOf 0 -\-user-type android.os.usertype.profile.CLONE <name>
               2. pm install-existing -\-user <id> com.whatsapp
               3. Add one more <activity-alias> block below with the new id and label.
+            ProfileWatcherService.resolveManagedUserIds() reads these same meta-data ints
+            to know which users to stop on SCREEN_OFF — no other config needed.
         -->
 
         <activity-alias
@@ -66,6 +85,18 @@
                 android:name="target_user_id"
                 android:value="11" />
         </activity-alias>
+
+        <!-- Foreground service that registers a runtime SCREEN_OFF receiver and stops
+             clone-profile WhatsApp instances when the screen locks. specialUse type is
+             required on API 34+; the property below is its mandatory subtype description. -->
+        <service
+            android:name=".ProfileWatcherService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Managing WhatsApp clone profile lifecycle" />
+        </service>
 
     </application>
 

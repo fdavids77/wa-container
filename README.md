@@ -199,19 +199,22 @@ If neither is configured, the build falls back to AGP's debug key with a visible
 
 > `keytool` cannot read APK v2/v3 signatures — use `apksigner` as shown above.
 
-### Install into Private Space (user 10)
+### Install into BOTH users
+
+The app must be installed into **user 10** (Private Space — where the launcher icons live)
+and **user 0** (primary user — where `ProfileWatcherService` runs so it receives
+`SCREEN_OFF` even while Private Space is locked).
 
 ```sh
 adb push dpc/build/outputs/apk/release/dpc-release.apk /data/local/tmp/
 adb shell su -c "pm install -r --user 10 /data/local/tmp/dpc-release.apk"
+adb shell su -c "pm install -r --user 0  /data/local/tmp/dpc-release.apk"
 adb shell su -c "pm grant --user 10 com.fdavids77.wacontainer android.permission.INTERACT_ACROSS_USERS_FULL"
+adb shell su -c "pm grant --user 0  com.fdavids77.wacontainer android.permission.INTERACT_ACROSS_USERS_FULL"
 ```
 
-Remove the stray user-0 install (the app has no function there):
-
-```sh
-adb shell su -c "pm uninstall --user 0 com.fdavids77.wacontainer"
-```
+`ProfileWatcherService` disables the launcher aliases in user 0 automatically on first
+start, so no WA3/WA4 icons appear in the main app drawer — only in Private Space.
 
 Unlock Private Space and tap the WA3 / WA4 icons to verify.
 
@@ -291,3 +294,51 @@ something upstream excludes clone profiles from enumeration. Not pursued —
 invisibility is actually desirable here.
 
 **`LauncherApps` / `CrossProfileApps`:** see §6.
+
+---
+
+## 9. Lock-triggered teardown
+
+When the screen turns off, `ProfileWatcherService` force-stops each managed clone-profile
+user via `su -c "am stop-user -f <id>"`. This mirrors Private Space's behaviour: the
+WhatsApp processes die and their tasks disappear from recents. When an icon is tapped,
+`LaunchWA` runs `am start-user <id>` (3 s timeout) before attempting the launch, so the
+profile is back up before the activity starts.
+
+**Tradeoff:** stopped instances receive no FCM notifications while the screen is off.
+This matches Private Space and is the intended behaviour.
+
+**How `ProfileWatcherService` works:**
+
+- Started at boot via `BootReceiver` (BOOT_COMPLETED, user 0) and on every trampoline tap
+  as a recovery mechanism
+- Runs as a foreground service (`foregroundServiceType="specialUse"`, `IMPORTANCE_MIN`
+  notification — appears in the silent section of the drawer)
+- Registers a runtime `ScreenLockReceiver` for `ACTION_SCREEN_OFF` (cannot be
+  manifest-declared on modern Android)
+- Reads managed user IDs from the alias `target_user_id` meta-data at startup — adding a
+  new instance requires only a new `<activity-alias>`, no code changes
+- When running as user 0, disables the `<activity-alias>` launcher entries via
+  `PackageManager.setComponentEnabledSetting` so icons only appear in Private Space
+
+**Log tags:** `LaunchWA` and `ProfileWatcher`
+
+```sh
+adb logcat -d -s LaunchWA:* ProfileWatcher:*
+```
+
+**Verify teardown:**
+
+```sh
+# Lock the screen, then immediately:
+adb shell su -c "ps -A | grep whatsapp"
+# u11_* and u13_* processes should be absent
+```
+
+**Verify startup:**
+
+```sh
+# Unlock Private Space, tap WA3/WA4, then:
+adb shell su -c "ps -A | grep whatsapp"
+# u13_* (or u11_*) process should appear within ~5 s of the tap
+```
