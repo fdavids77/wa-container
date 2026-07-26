@@ -53,22 +53,33 @@ which targets Android 11–13). Confirmed working on Android 16.
 
 ```sh
 adb shell su -c "getprop fw.max_users"
-adb shell su -c "resetprop fw.max_users 5"   # not persistent across reboot
+adb shell su -c "resetprop fw.max_users 7"   # not persistent across reboot
 ```
 
 To persist across reboots, add to a Magisk module's `system.prop`:
 
 ```
-fw.max_users=5
+fw.max_users=7
 ```
 
 ---
 
 ## 3. Provisioning a WhatsApp instance
 
+**Clone profile → user ID mapping (this device):**
+
+| Instance | User ID | Background |
+|----------|---------|------------|
+| WA1 | 11 | red `#E53935` |
+| WA2 | 12 | amber `#F57F17` |
+| WA3 | 13 | teal `#00897B` |
+| WA4 | 14 | blue `#1565C0` |
+| WA5 | 15 | purple `#6A1B9A` |
+
 Run once per instance. Note the user id printed by `pm create-user`.
 
 ```sh
+# Example: WA3 (user 13)
 adb shell su -c "pm create-user --profileOf 0 --user-type android.os.usertype.profile.CLONE WA3"
 # → Success: created user id 13
 
@@ -105,8 +116,11 @@ activity), so each alias independently targets its own user via `getActivityInfo
 
 | Alias | Label | User | Background colour |
 |-------|-------|------|-------------------|
-| `.LaunchWA3` | WA3 | 13 | `#128C7E` teal |
-| `.LaunchWA4` | WA4 | 11 | `#075E54` dark green |
+| `.LaunchWA1` | WA1 | 11 | `#E53935` red |
+| `.LaunchWA2` | WA2 | 12 | `#F57F17` amber |
+| `.LaunchWA3` | WA3 | 13 | `#00897B` teal |
+| `.LaunchWA4` | WA4 | 14 | `#1565C0` blue |
+| `.LaunchWA5` | WA5 | 15 | `#6A1B9A` purple |
 
 **To add a new instance,** copy this block into the manifest:
 
@@ -214,9 +228,9 @@ adb shell su -c "pm grant --user 0  com.fdavids77.wacontainer android.permission
 ```
 
 `ProfileWatcherService` disables the launcher aliases in user 0 automatically on first
-start, so no WA3/WA4 icons appear in the main app drawer — only in Private Space.
+start, so no WA1–WA5 icons appear in the main app drawer — only in Private Space.
 
-Unlock Private Space and tap the WA3 / WA4 icons to verify.
+Unlock Private Space and tap the WA1–WA5 icons to verify.
 
 ---
 
@@ -332,13 +346,13 @@ adb logcat -d -s LaunchWA:* ProfileWatcher:*
 ```sh
 # Lock the screen, then immediately:
 adb shell su -c "ps -A | grep whatsapp"
-# u11_* and u13_* processes should be absent
+# u11_* through u15_* processes should all be absent
 ```
 
 **Verify startup:**
 
 ```sh
-# Unlock Private Space, tap WA3/WA4, then:
+# Unlock Private Space, tap any WA icon, then:
 adb shell su -c "ps -A | grep whatsapp"
-# u13_* (or u11_*) process should appear within ~5 s of the tap
+# u11_* (WA1), u12_* (WA2), u13_* (WA3), u14_* (WA4), or u15_* (WA5) should appear within ~5 s
 ```

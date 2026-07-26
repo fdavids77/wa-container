@@ -50,9 +50,42 @@
               1. pm create-user -\-profileOf 0 -\-user-type android.os.usertype.profile.CLONE <name>
               2. pm install-existing -\-user <id> com.whatsapp
               3. Add one more <activity-alias> block below with the new id and label.
+              4. Add a color, background drawable, and mipmap adaptive-icon for the new alias.
             ProfileWatcherService.resolveManagedUserIds() reads these same meta-data ints
             to know which users to stop on SCREEN_OFF — no other config needed.
         -->
+
+        <activity-alias
+            android:name=".LaunchWA1"
+            android:targetActivity=".LaunchWA"
+            android:label="WA1"
+            android:icon="@mipmap/ic_wa1"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="target_user_id"
+                android:value="11" />
+        </activity-alias>
+
+        <activity-alias
+            android:name=".LaunchWA2"
+            android:targetActivity=".LaunchWA"
+            android:label="WA2"
+            android:icon="@mipmap/ic_wa2"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="target_user_id"
+                android:value="12" />
+        </activity-alias>
 
         <activity-alias
             android:name=".LaunchWA3"
@@ -83,7 +116,23 @@
             </intent-filter>
             <meta-data
                 android:name="target_user_id"
-                android:value="11" />
+                android:value="14" />
+        </activity-alias>
+
+        <activity-alias
+            android:name=".LaunchWA5"
+            android:targetActivity=".LaunchWA"
+            android:label="WA5"
+            android:icon="@mipmap/ic_wa5"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="target_user_id"
+                android:value="15" />
         </activity-alias>
 
         <!-- Foreground service that registers a runtime SCREEN_OFF receiver and stops

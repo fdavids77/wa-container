@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Adaptive icon backgrounds — must be visually distinct at a glance -->
-    <color name="wa3_teal">#128C7E</color>
-    <color name="wa4_blue">#075E54</color>
+    <!-- Adaptive icon backgrounds — hues spread across the wheel so all five
+         are distinguishable at a glance: red · amber · teal · blue · purple -->
+    <color name="wa1_red">#E53935</color>
+    <color name="wa2_amber">#F57F17</color>
+    <color name="wa3_teal">#00897B</color>
+    <color name="wa4_blue">#1565C0</color>
+    <color name="wa5_purple">#6A1B9A</color>
 </resources>
