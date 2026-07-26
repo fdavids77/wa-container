@@ -27,6 +27,37 @@ class ProfileWatcherService : Service() {
         fun start(context: Context) {
             context.startForegroundService(Intent(context, ProfileWatcherService::class.java))
         }
+
+        // Called from LaunchWA (user 10) to ensure the user-0 service instance is running.
+        // Without this, the user-0 app stays in the "stopped" state after a fresh install
+        // (no launcher icons in user 0 means it is never manually opened, so BOOT_COMPLETED
+        // is never delivered to it). startForegroundServiceAsUser reflection is tried first;
+        // root shell is the fallback. Either path pulls user 0 out of stopped state.
+        fun ensureRunningInUser0(context: Context) {
+            try {
+                val userHandleOf = UserHandle::class.java.getMethod("of", Int::class.javaPrimitiveType)
+                val user0 = userHandleOf.invoke(null, 0) as UserHandle
+                val intent = Intent(context, ProfileWatcherService::class.java)
+                val startFgsAsUser = Context::class.java.getMethod(
+                    "startForegroundServiceAsUser",
+                    Intent::class.java,
+                    UserHandle::class.java
+                )
+                startFgsAsUser.invoke(context, intent, user0)
+                Log.i(TAG, "ensureRunningInUser0: kicked service in user 0 via reflection")
+            } catch (t: Throwable) {
+                Log.w(TAG, "ensureRunningInUser0: reflection failed, falling back to root", t)
+                try {
+                    Runtime.getRuntime().exec(arrayOf(
+                        "su", "-c",
+                        "am start-foreground-service --user 0 -n ${context.packageName}/.ProfileWatcherService"
+                    ))
+                    Log.i(TAG, "ensureRunningInUser0: kicked service in user 0 via root shell")
+                } catch (t2: Throwable) {
+                    Log.w(TAG, "ensureRunningInUser0: root shell also failed", t2)
+                }
+            }
+        }
     }
 
     private var screenLockReceiver: ScreenLockReceiver? = null
@@ -39,7 +70,7 @@ class ProfileWatcherService : Service() {
         startForegroundCompat()
         disableAliasesIfNotPrivateSpace()
         val userIds = resolveManagedUserIds()
-        Log.i(TAG, "managed user ids: $userIds")
+        Log.i(TAG, "managed user ids: $userIds (${userIds.size})")
         val receiver = ScreenLockReceiver(userIds)
         registerReceiver(receiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
         screenLockReceiver = receiver
@@ -75,14 +106,23 @@ class ProfileWatcherService : Service() {
     }
 
     // Enumerate activity-aliases (targetActivity != null) that carry a target_user_id meta-data int.
-    // This is the single source of truth — adding a new instance requires only a new alias.
+    // MATCH_DISABLED_COMPONENTS is required: in user 0 the aliases are disabled by
+    // disableAliasesIfNotPrivateSpace() before this runs, so without that flag the scan
+    // returns empty and SCREEN_OFF teardown watches zero users.
     @Suppress("DEPRECATION")
     private fun resolveManagedUserIds(): Set<Int> {
         return try {
-            val pi = packageManager.getPackageInfo(
-                packageName,
-                PackageManager.GET_ACTIVITIES or PackageManager.GET_META_DATA
-            )
+            val intFlags = PackageManager.GET_ACTIVITIES or
+                           PackageManager.GET_META_DATA or
+                           PackageManager.MATCH_DISABLED_COMPONENTS
+            val pi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(
+                    packageName,
+                    PackageManager.PackageInfoFlags.of(intFlags.toLong())
+                )
+            } else {
+                packageManager.getPackageInfo(packageName, intFlags)
+            }
             pi.activities
                 ?.filter { it.targetActivity != null }
                 ?.mapNotNull { info ->

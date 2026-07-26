@@ -25,8 +25,12 @@ class LaunchWA : Activity() {
 
         val targetUserId = resolveTargetUserId()
 
-        // Ensure the watcher service is running (no-op if already started).
+        // Ensure the watcher service is running in the current user (no-op if already started).
         ProfileWatcherService.start(this)
+        // Also ensure user-0 service is up. A fresh install leaves the user-0 package in the
+        // "stopped" state (no launcher icon there = never manually launched), which blocks
+        // BOOT_COMPLETED delivery. Poking startForegroundServiceAsUser from user 10 clears that.
+        ProfileWatcherService.ensureRunningInUser0(this)
 
         // Bring the target user up before launching; launching into a stopped user fails.
         startUserBeforeLaunch(targetUserId)

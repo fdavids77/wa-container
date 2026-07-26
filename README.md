@@ -330,10 +330,43 @@ This matches Private Space and is the intended behaviour.
   notification — appears in the silent section of the drawer)
 - Registers a runtime `ScreenLockReceiver` for `ACTION_SCREEN_OFF` (cannot be
   manifest-declared on modern Android)
-- Reads managed user IDs from the alias `target_user_id` meta-data at startup — adding a
-  new instance requires only a new `<activity-alias>`, no code changes
+- Reads managed user IDs from the alias `target_user_id` meta-data at startup with
+  `MATCH_DISABLED_COMPONENTS` — aliases are disabled in user 0 to hide icons, so this
+  flag is required to still enumerate them; without it the scan returns empty and
+  SCREEN_OFF teardown watches zero users
 - When running as user 0, disables the `<activity-alias>` launcher entries via
   `PackageManager.setComponentEnabledSetting` so icons only appear in Private Space
+
+**Stopped-state bootstrap problem:**
+
+A freshly-installed app is in the Android "stopped" state and does not receive
+`BOOT_COMPLETED` until it has been launched at least once. In user 0 the app has no
+launcher icons (they are disabled by the service itself), so it would never leave the
+stopped state on its own.
+
+Fix: every time `LaunchWA` runs in user 10 (Private Space), it calls
+`ProfileWatcherService.ensureRunningInUser0()`, which uses `startForegroundServiceAsUser`
+reflection (falling back to a root shell) to start the user-0 service instance. This pull
+the user-0 package out of stopped state as a side effect. After the first icon tap,
+subsequent boots deliver `BOOT_COMPLETED` normally.
+
+> **Alternative (more robust):** A Magisk `service.sh` root loop polling the lock state
+> avoids app-lifecycle and stopped-state limits entirely:
+>
+> ```sh
+> # /data/adb/modules/<module>/service.sh
+> while true; do
+>   state=$(dumpsys power | grep 'mHoldingDisplaySuspendBlocker' | tr -d ' ')
+>   if [ "$state" = "mHoldingDisplaySuspendBlocker=false" ]; then
+>     for uid in 11 12 13 14 15; do
+>       am stop-user -f $uid 2>/dev/null
+>     done
+>   fi
+>   sleep 5
+> done &
+> ```
+>
+> Use this if the in-app service proves unreliable after system updates.
 
 **Log tags:** `LaunchWA` and `ProfileWatcher`
 
