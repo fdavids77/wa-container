@@ -25,15 +25,12 @@ class LaunchWA : Activity() {
 
         val targetUserId = resolveTargetUserId()
 
-        // Ensure the watcher service is running in the current user (no-op if already started).
-        ProfileWatcherService.start(this)
-        // Also ensure user-0 service is up. A fresh install leaves the user-0 package in the
-        // "stopped" state (no launcher icon there = never manually launched), which blocks
-        // BOOT_COMPLETED delivery. Poking startForegroundServiceAsUser from user 10 clears that.
-        ProfileWatcherService.ensureRunningInUser0(this)
+        // Hide WA Container icons from user 0's main app drawer. Idempotent.
+        disableAliasesInUser0()
 
-        // Bring the target user up before launching; launching into a stopped user fails.
-        startUserBeforeLaunch(targetUserId)
+        // Ensure the target clone profile is running before launching into it.
+        // am start-user is a no-op if already running, so this is safe every time.
+        ensureUserRunning(targetUserId)
 
         val launched = tryReflection(targetUserId) || tryRootShell(targetUserId)
 
@@ -59,14 +56,67 @@ class LaunchWA : Activity() {
         }
     }
 
-    private fun startUserBeforeLaunch(userId: Int) {
+    // Disable the launcher aliases in user 0 so the WA Container icons don't appear in
+    // the main app drawer. LaunchWA always runs in user 10 (Private Space), so the aliases
+    // stay enabled there. Uses setComponentEnabledSettingAsUser reflection
+    // (INTERACT_ACROSS_USERS_FULL grants this); falls back to root shell pm-disable.
+    @Suppress("DEPRECATION")
+    private fun disableAliasesInUser0() {
+        try {
+            val pi = packageManager.getPackageInfo(
+                packageName,
+                PackageManager.GET_ACTIVITIES or PackageManager.GET_META_DATA
+            )
+            val aliases = pi.activities?.filter { it.targetActivity != null } ?: return
+            val userHandleOf = UserHandle::class.java.getMethod("of", Int::class.javaPrimitiveType)
+            val user0 = userHandleOf.invoke(null, 0) as UserHandle
+            val setEnabledAsUser = PackageManager::class.java.getMethod(
+                "setComponentEnabledSettingAsUser",
+                ComponentName::class.java,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                UserHandle::class.java
+            )
+            for (info in aliases) {
+                val cn = ComponentName(packageName, info.name)
+                setEnabledAsUser.invoke(
+                    packageManager, cn,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP,
+                    user0
+                )
+                Log.i(TAG, "disabled alias ${cn.shortClassName} in user 0")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "disableAliasesInUser0: reflection failed, trying root shell", e)
+            try {
+                @Suppress("DEPRECATION")
+                val pi = packageManager.getPackageInfo(
+                    packageName,
+                    PackageManager.GET_ACTIVITIES or PackageManager.GET_META_DATA
+                )
+                val cmds = pi.activities
+                    ?.filter { it.targetActivity != null }
+                    ?.joinToString("; ") { info -> "pm disable --user 0 ${packageName}/${info.name}" }
+                    ?: return
+                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmds))
+                proc.waitFor(3, TimeUnit.SECONDS)
+                Log.i(TAG, "disableAliasesInUser0: done via root shell")
+            } catch (t: Throwable) {
+                Log.w(TAG, "disableAliasesInUser0: root shell also failed", t)
+            }
+        }
+    }
+
+    private fun ensureUserRunning(userId: Int) {
         try {
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "am start-user $userId"))
-            val finished = proc.waitFor(3, TimeUnit.SECONDS)
+            val finished = proc.waitFor(4, TimeUnit.SECONDS)
             val exit = if (finished) proc.exitValue() else { proc.destroyForcibly(); -1 }
-            Log.i(TAG, "am start-user $userId exit=$exit" + if (!finished) " (timed out)" else "")
+            Log.i(TAG, "ensuring user $userId running (start-user exit=$exit)" +
+                    if (!finished) " (timed out)" else "")
         } catch (t: Throwable) {
-            Log.w(TAG, "am start-user $userId threw", t)
+            Log.w(TAG, "ensuring user $userId running threw", t)
         }
     }
 
