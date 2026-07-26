@@ -1,0 +1,14 @@
+#!/sbin/sh
+##############################################################################
+# Magisk Module Installer — waclone
+# Sources Magisk's util_functions.sh and delegates to install_module.
+# Requires Magisk v20.4+.
+##############################################################################
+
+[ -f /data/adb/magisk/util_functions.sh ] \
+  || { echo "! /data/adb/magisk/util_functions.sh not found — install Magisk v20.4+"; exit 1; }
+
+. /data/adb/magisk/util_functions.sh
+
+install_module
+exit 0

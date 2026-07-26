@@ -16,6 +16,7 @@ biometric/PIN lock gates access, no custom auth code required.
 |--------|---------|
 | `dpc/` | `LaunchWA` trampoline, `<activity-alias>` launcher icons, adaptive icon assets. `AdminReceiver` is vestigial from an earlier managed-profile approach and unused. |
 | `hide/` | LSPosed drawer-filter module. Unused in the current design — clone-profile apps are invisible to the launcher by default. |
+| `waclone-module/` | Flashable Magisk module (`waclone.zip`). Runs a root shell polling loop that stops clone-profile users on screen lock and restarts them on unlock — outside the Android app lifecycle. |
 
 ---
 
@@ -388,4 +389,75 @@ adb shell su -c "ps -A | grep whatsapp"
 # Unlock Private Space, tap any WA icon, then:
 adb shell su -c "ps -A | grep whatsapp"
 # u11_* (WA1), u12_* (WA2), u13_* (WA3), u14_* (WA4), or u15_* (WA5) should appear within ~5 s
+```
+
+---
+
+## 10. Magisk module — waclone
+
+`waclone.zip` is a flashable Magisk module that runs the teardown loop as a root shell
+process, entirely outside Android's app lifecycle. It is more robust than the in-app
+`ProfileWatcherService` approach: it cannot be killed by the system, is not subject to
+the stopped-state problem, and survives app uninstall.
+
+### Flash
+
+In the Magisk app: **Modules → Install from storage**, select `waclone.zip`, then reboot.
+
+The module installs to `/data/adb/modules/waclone/`. Magisk runs `service.sh` at the
+`late_start service` boot stage, which detaches `watch.sh` into the background.
+
+### How it works
+
+`watch.sh` polls `dumpsys window` for `mDreamingLockscreen` every 2 seconds:
+
+| Value | Action |
+|-------|--------|
+| `true` (screen locked) | `am stop-user -f` for each user in `USERS` |
+| `false` (screen unlocked) | `am start-user` for each user in `USERS` |
+
+The loop waits for `sys.boot_completed=1` plus a 20-second settling delay before
+starting, so it does not race against boot-time user startup.
+
+### Changing which users are managed
+
+Edit the `USERS` variable at the top of `watch.sh`:
+
+```sh
+# In-place on device (no reflash needed — change survives module updates if path is stable):
+adb shell su -c "sed -i 's/^USERS=.*/USERS=\"11 12 13 14 15 16\"/' /data/adb/modules/waclone/watch.sh"
+adb shell su -c "pkill -f watch.sh"   # kill old loop; service.sh on next boot restarts it
+# OR just reboot
+```
+
+Or edit `waclone-module/watch.sh` in this repo, re-run the zip command, and reflash.
+
+### Lock signal caveat — screen saver must be disabled
+
+The lock signal is `mDreamingLockscreen` from `dumpsys window`. When the Android screen
+saver (Daydream) is active, `mShowingDream=true` is set alongside `mDreamingLockscreen=true`,
+making the signal ambiguous — the loop would stop-user while the screen is merely dreaming.
+
+**Disable screen saver:** Settings → Display → Screen saver → Off.
+
+If screen saver must stay on, switch `watch.sh` to the power wakefulness signal:
+
+```sh
+# Replace the STATE= line in watch.sh with:
+STATE="$(dumpsys power | grep -m1 mWakefulness | grep -o 'Awake\|Asleep')"
+# And change comparisons: "true" → "Asleep", "false" → "Awake"
+```
+
+### Verification
+
+```sh
+# After reboot — confirm the loop is running:
+adb shell su -c "ps -A | grep watch.sh"
+
+# Live lock/unlock events (logcat tag waclone):
+adb shell su -c "logcat -s waclone"
+
+# Lock the screen (works over adb while locked):
+adb shell su -c "ps -A | grep whatsapp"
+# u11_* through u15_* should be absent within ~2 s of lock
 ```

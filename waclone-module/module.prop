@@ -1,0 +1,6 @@
+id=waclone
+name=WhatsApp Clone Teardown
+version=v1.0
+versionCode=1
+author=fdavids77
+description=Stops WhatsApp clone profiles (users 11-15) on screen lock, restarts on unlock.
