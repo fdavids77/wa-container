@@ -109,14 +109,40 @@ class LaunchWA : Activity() {
     }
 
     private fun ensureUserRunning(userId: Int) {
+        // Step 1: am start-user — synchronous-ish; waits until user reaches at least RUNNING_LOCKED.
         try {
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "am start-user $userId"))
-            val finished = proc.waitFor(4, TimeUnit.SECONDS)
+            val finished = proc.waitFor(10, TimeUnit.SECONDS)
             val exit = if (finished) proc.exitValue() else { proc.destroyForcibly(); -1 }
-            Log.i(TAG, "ensuring user $userId running (start-user exit=$exit)" +
-                    if (!finished) " (timed out)" else "")
+            Log.i(TAG, "start-user $userId exit=$exit" + if (!finished) " (timed out)" else "")
         } catch (t: Throwable) {
-            Log.w(TAG, "ensuring user $userId running threw", t)
+            Log.w(TAG, "start-user $userId threw", t)
+        }
+
+        // Step 2: poll until RUNNING_UNLOCKED — user may still be initialising after start-user returns.
+        val deadline = System.currentTimeMillis() + 8_000L
+        var lastState = "?"
+        while (System.currentTimeMillis() < deadline) {
+            lastState = runShell("am get-started-user-state $userId")
+            if (lastState.contains("RUNNING_UNLOCKED", ignoreCase = true)) {
+                Log.i(TAG, "user $userId ready: $lastState")
+                return
+            }
+            Log.i(TAG, "user $userId state: $lastState — waiting")
+            Thread.sleep(500)
+        }
+        Log.w(TAG, "user $userId readiness poll timed out (last: $lastState) — proceeding anyway")
+    }
+
+    private fun runShell(cmd: String): String {
+        return try {
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val out = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor(1, TimeUnit.SECONDS)
+            out
+        } catch (t: Throwable) {
+            Log.w(TAG, "runShell threw: ${t.message}")
+            ""
         }
     }
 
