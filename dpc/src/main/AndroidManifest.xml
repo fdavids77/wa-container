@@ -34,8 +34,8 @@
               2. pm install-existing -\-user <id> com.whatsapp
               3. Add one more <activity-alias> block below with the new id and label.
               4. Add a color, background drawable, and mipmap adaptive-icon for the new alias.
-            Screen-lock teardown is handled by the waclone Magisk module (watch.sh), not by
-            any component in this APK.
+            Recents-card hiding is handled by the hideRecent LSPosed module, not by any
+            component in this APK.
         -->
 
         <activity-alias

@@ -1,136 +1,141 @@
 # wa-container
 
-Runs multiple native (unmodified, Play-updatable) WhatsApp instances on one rooted Pixel.
+Five native, unmodified, Play-updatable WhatsApp instances on one rooted Pixel.
 Each lives in its own Android **CLONE profile** with a separate UID and data directory.
-Clone-profile apps are invisible to the Pixel launcher, so each gets a trampoline launcher
-icon. Those icons are installed into **Private Space** (user 10) — Android's own
-biometric/PIN lock gates access, no custom auth code required.
+Launcher icons live in **Private Space** (user 10) — Android's biometric/PIN gate controls
+access. Recents cards are hidden by an LSPosed hook so WhatsApp doesn't clutter the task
+switcher.
 
-**Verified on:** Pixel 9 Pro XL (komodo), Android 16, Magisk 30.6, LSPosed JingMatrix/Vector fork.
+**Verified on:** Pixel 8 (blazer), Android 16, Magisk 30.7.
 
 ---
 
-## Repo layout
+## Components
 
-| Module | Purpose |
-|--------|---------|
-| `dpc/` | `LaunchWA` trampoline, `<activity-alias>` launcher icons, adaptive icon assets. `AdminReceiver` is vestigial from an earlier managed-profile approach and unused. |
-| `hide/` | LSPosed drawer-filter module. Unused in the current design — clone-profile apps are invisible to the launcher by default. |
-| `waclone-module/` | Flashable Magisk module (`waclone.zip`). Runs a root shell polling loop that stops clone-profile users on screen lock and restarts them on unlock — outside the Android app lifecycle. |
+| # | Component | Role |
+|---|-----------|------|
+| 1 | CLONE profiles (users 11–15) | Each holds one registered WhatsApp |
+| 2 | **AlwaysCreateUser** LSPosed module | Lifts the 1-clone-per-parent cap so >1 clone profile can exist |
+| 3 | **dpc** APK | Trampoline launcher installed in Private Space; `am start-user` then `startActivityAsUser` |
+| 4 | **hideRecent** LSPosed module | Hides all WhatsApp recents cards via `isVisibleRecentTask` hook |
 
 ---
 
 ## 1. Prerequisites
 
-- Rooted Pixel with **Magisk** (tested 30.6)
+- Rooted Pixel with **Magisk** (tested 30.7)
 - **LSPosed JingMatrix/Vector fork** — the original SIGILLs on Android 16; the Vector fork does not
-- **adb** + Android SDK build-tools (for `apksigner` and `aapt2`)
+- **adb** + Android SDK build-tools (for `apksigner`)
 - **Private Space** already set up (Settings → Safety & privacy → Private Space)
-- LSPosed module **[icepony/AlwaysCreateUser](https://github.com/icepony/AlwaysCreateUser)**
-  (`io.github.icepony.alwayscreateuser`), scope set to **System Framework**
+- LSPosed module **[AlwaysCreateUser](https://github.com/icepony/AlwaysCreateUser)**
+  (`io.github.icepony.alwayscreateuser`), scope → **System Framework**
+- LSPosed module **[hideRecent](https://github.com/Young-Lord/hideRecent)**
+  (`com.young_lord.hiderecent` or per release), scope → **System Framework**
 
-> **Safety note — AlwaysCreateUser:** It hooks `system_server`. A bad hook can bootloop.
-> Know how to reach recovery and remove the LSPosed module entry from `/data/adb/lspd/`
-> before enabling.
+> **AlwaysCreateUser hook (Android 14+):** patches `isCreationOverrideEnabled` in
+> `UserManagerService`. A bad hook can bootloop — know how to reach recovery and remove
+> the module from `/data/adb/lspd/` before enabling.
 
 ---
 
-## 2. Why AlwaysCreateUser is needed
+## 2. One-time device settings
 
-Stock per-type caps from `dumpsys user`:
+### 2a. Magisk Multiuser Mode (CRITICAL)
 
-```
-PRIVATE  mMaxAllowedPerParent 1
-MANAGED  mMaxAllowedPerParent 1
-CLONE    mMaxAllowed 3   mMaxAllowedPerParent 1
-```
+In the Magisk app: **Settings → Superuser → Multiuser mode**, set to
+**"Device owner and profile users"** (or equivalent non-default option).
 
-User 0 is the only parent, so stock Android allows only one CLONE profile.
-AlwaysCreateUser lifts the per-parent cap. On Android 14+ its hook target is
-`isCreationOverrideEnabled` in `UserManagerService` (not `canAddMoreProfilesToUser`,
-which targets Android 11–13). Confirmed working on Android 16.
+The default value ("Device owner only") silently **denies su to apps running in secondary
+or profile users**, including Private Space. With the default, tapping a trampoline icon
+runs `am start-user` as the app user rather than root — the command fails with exit 13,
+the clone profile stays stopped, and the icon does nothing.
 
-**Total-user cap** is separate. Check and raise if needed:
+### 2b. Disable per-clone lockscreen
+
+Each clone profile has its own lock by default, which prompts for the device PIN on every
+cross-profile launch. Private Space is already the security gate, so disable the lock for
+each clone user:
 
 ```sh
-adb shell su -c "getprop fw.max_users"
-adb shell su -c "resetprop fw.max_users 7"   # not persistent across reboot
+# Run for each user id (11–15):
+adb shell su -c "locksettings set-disabled --user 11 true"
+adb shell su -c "locksettings set-disabled --user 12 true"
+adb shell su -c "locksettings set-disabled --user 13 true"
+adb shell su -c "locksettings set-disabled --user 14 true"
+adb shell su -c "locksettings set-disabled --user 15 true"
 ```
 
-To persist across reboots, add to a Magisk module's `system.prop`:
+### 2c. Screensaver
 
-```
-fw.max_users=7
-```
+Disable the screen saver (Settings → Display → Screen saver → Off). This is only relevant
+if you run a lock-based profile watcher; the shipped design has no watcher, so this is
+optional but still good practice.
 
 ---
 
-## 3. Provisioning a WhatsApp instance
+## 3. Provisioning an instance
 
-**Clone profile → user ID mapping (this device):**
-
-| Instance | User ID | Background |
-|----------|---------|------------|
-| WA1 | 11 | red `#E53935` |
-| WA2 | 12 | amber `#F57F17` |
-| WA3 | 13 | teal `#00897B` |
-| WA4 | 14 | blue `#1565C0` |
-| WA5 | 15 | purple `#6A1B9A` |
+> Requires AlwaysCreateUser active. Without it, Android allows only one CLONE profile per
+> parent (user 0).
 
 Run once per instance. Note the user id printed by `pm create-user`.
 
 ```sh
-# Example: WA3 (user 13)
-adb shell su -c "pm create-user --profileOf 0 --user-type android.os.usertype.profile.CLONE WA3"
-# → Success: created user id 13
+# Example: a sixth instance (substitute the printed id for <id>)
+adb shell su -c "pm create-user --profileOf 0 --user-type android.os.usertype.profile.CLONE WA6"
+# → Success: created user id 16
 
-adb shell su -c "pm install-existing --user 13 com.whatsapp"
-adb shell su -c "am start-user 13"
-adb shell su -c "am start --user 13 -n com.whatsapp/com.whatsapp.Main"
-# register the phone number in the WhatsApp instance that opens
+adb shell su -c "pm install-existing --user <id> com.whatsapp"
+adb shell su -c "am start-user <id>"
+adb shell su -c "am start --user <id> -n com.whatsapp/com.whatsapp.Main"
+# Register the phone number in the WhatsApp screen that opens.
+
+adb shell su -c "locksettings set-disabled --user <id> true"
 ```
 
-> Use `pm install-existing`, NOT `pm install <apk>`. Installing an APK into a secondary
-> user fails with `INSTALL_FAILED_VERSION_DOWNGRADE` when a newer version is already
-> installed on the device.
+> **Use `pm install-existing`, NOT `pm install <apk>`.** Installing an APK into a
+> secondary user fails with `INSTALL_FAILED_VERSION_DOWNGRADE` when a newer version is
+> already on the device.
 
-**Verify the instance:**
+**Verify:**
 
 ```sh
-adb shell su -c "ls -la /data/user/13/ | grep whatsapp"   # own UID e.g. u13_a382
-adb shell su -c "ps -A | grep whatsapp"                    # one live process per instance
-adb shell su -c "pm list users"                            # profile shows 'running'
+adb shell su -c "ls /data/user/<id>/ | grep whatsapp"   # own UID e.g. u16_a382
+adb shell su -c "ps -A | grep whatsapp"                  # one process per running instance
+adb shell su -c "pm list users"                          # user shows as 'running'
 ```
 
-Clone profiles need no profile owner and auto-start after reboot.
+**fw.max_users:** Stock Android may cap total users. Check and raise if needed:
+
+```sh
+adb shell su -c "getprop fw.max_users"
+adb shell su -c "resetprop fw.max_users 9"   # not persistent; add to a Magisk module's system.prop
+```
 
 ---
 
 ## 4. Adding a launcher icon for an instance
 
 Each instance gets one `<activity-alias>` in `dpc/src/main/AndroidManifest.xml`.
-`LaunchWA` reads `target_user_id` from the alias's own component meta-data. When the
-launcher starts an alias, `Activity.componentName` resolves to the alias (not the target
-activity), so each alias independently targets its own user via `getActivityInfo()`.
 
-**Existing aliases:**
+**Existing aliases (users 11–15):**
 
-| Alias | Label | User | Background colour |
-|-------|-------|------|-------------------|
+| Alias | Label | User | Icon background |
+|-------|-------|------|----------------|
 | `.LaunchWA1` | WA1 | 11 | `#E53935` red |
 | `.LaunchWA2` | WA2 | 12 | `#F57F17` amber |
 | `.LaunchWA3` | WA3 | 13 | `#00897B` teal |
 | `.LaunchWA4` | WA4 | 14 | `#1565C0` blue |
 | `.LaunchWA5` | WA5 | 15 | `#6A1B9A` purple |
 
-**To add a new instance,** copy this block into the manifest:
+**To add a new instance**, add this block to the manifest:
 
 ```xml
 <activity-alias
-    android:name=".LaunchWA<N>"
+    android:name=".LaunchWA6"
     android:targetActivity=".LaunchWA"
-    android:label="WA<N>"
-    android:icon="@mipmap/ic_wa<n>"
+    android:label="WA6"
+    android:icon="@mipmap/ic_wa6"
     android:theme="@android:style/Theme.NoDisplay"
     android:exported="true">
     <intent-filter>
@@ -139,7 +144,7 @@ activity), so each alias independently targets its own user via `getActivityInfo
     </intent-filter>
     <meta-data
         android:name="target_user_id"
-        android:value="<id>" />
+        android:value="16" />
 </activity-alias>
 ```
 
@@ -147,39 +152,52 @@ Then add alongside it:
 
 **`res/values/colors.xml`**
 ```xml
-<color name="wa<n>_color">#RRGGBB</color>
+<color name="wa6_color">#RRGGBB</color>
 ```
 
-**`res/drawable/ic_wa<n>_background.xml`**
+**`res/drawable/ic_wa6_background.xml`**
 ```xml
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="@color/wa<n>_color" />
+    <solid android:color="@color/wa6_color" />
 </shape>
 ```
 
-**`res/mipmap-anydpi-v26/ic_wa<n>.xml`**
+**`res/mipmap-anydpi-v26/ic_wa6.xml`**
 ```xml
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_wa<n>_background" />
+    <background android:drawable="@drawable/ic_wa6_background" />
     <foreground android:drawable="@drawable/ic_wa_foreground" />
 </adaptive-icon>
 ```
 
-`ic_wa_foreground` is the shared white speech-bubble vector with a phone-shape cutout
-(`fillType="evenOdd"` — the background colour shows through the cutout, making icons
-distinguishable by colour alone). The background is the only thing that changes per alias.
+`ic_wa_foreground` is a shared white speech-bubble vector with a phone-shape cutout
+(`fillType="evenOdd"`); the background colour shows through the cutout, making icons
+distinguishable by colour alone. Build and reinstall into user 10 after.
 
 ---
 
-## 5. Build and install
+## 5. Hiding WhatsApp from recents
 
-### Signing setup
+Install the **hideRecent** LSPosed module, scope → **System Framework**, then:
 
-The same keystore (`wacontainer.jks`, alias `wacontainer`) is used by CI and local
-builds so APKs are always interchangeable.
+1. Open the hideRecent app → add **com.whatsapp** → set mode to **Hide task**.
+2. Reboot (the `isVisibleRecentTask` hook applies at boot; a soft-restart is not enough).
+
+The hook cannot distinguish between users, so it also hides user-0 WhatsApp from recents
+if installed there. Acceptable — the clone instances are the only ones in active use.
+
+> **Why not force-stop or `am task remove`?** Neither reliably clears the recents card.
+> The `isVisibleRecentTask` hook is the only reliable approach without a custom launcher.
+
+---
+
+## 6. Build and install dpc
+
+### Signing
+
+The release keystore (`wacontainer.jks`, alias `wacontainer`) is used for all builds.
 
 **Local** — add to `~/.gradle/gradle.properties`:
-
 ```properties
 WA_KEYSTORE_PATH=/home/kali/projects/wa-container/wacontainer.jks
 WA_KEYSTORE_PASSWORD=<password>
@@ -187,17 +205,14 @@ WA_KEY_ALIAS=wacontainer
 WA_KEY_PASSWORD=<password>
 ```
 
-**CI** — GitHub Actions secrets on `fdavids77/wa-container`:
-`KEYSTORE_B64` (base64 of the jks), `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
+**CI** — GitHub Actions secrets: `KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
 
-If neither is configured, the build falls back to AGP's debug key with a visible
-`⚠` warning in Gradle output. That APK cannot be installed over a release-signed build.
+Without either, AGP falls back to a debug key (visible `⚠` in Gradle output). A debug-signed
+APK cannot be installed over a release-signed build — uninstall first:
 
-> **First-time switch from debug-signed build:** uninstall the old copy before installing
-> the release-signed one — a signature mismatch cannot be resolved by `-r`:
-> ```sh
-> adb shell su -c "pm uninstall --user 10 com.fdavids77.wacontainer"
-> ```
+```sh
+adb shell su -c "pm uninstall --user 10 com.fdavids77.wacontainer"
+```
 
 ### Build
 
@@ -205,259 +220,108 @@ If neither is configured, the build falls back to AGP's debug key with a visible
 ./gradlew :dpc:assembleRelease
 ```
 
-### Verify the signature before installing
+### Verify signature
 
 ```sh
 ~/Android/Sdk/build-tools/36.1.0/apksigner verify --print-certs \
   dpc/build/outputs/apk/release/dpc-release.apk | grep -i sha-256
+# Expected: 5665fbc234080a635c4b6042e60aabe2ad88a67abf554c4680ae1b2b5d7fa9ce
 ```
 
-> `keytool` cannot read APK v2/v3 signatures — use `apksigner` as shown above.
+> `keytool` cannot read APK v2/v3 signatures — use `apksigner`.
 
-### Install into BOTH users
+### Install
 
-The app must be installed into **user 10** (Private Space — where the launcher icons live)
-and **user 0** (primary user — where `ProfileWatcherService` runs so it receives
-`SCREEN_OFF` even while Private Space is locked).
+Install into **user 10** (Private Space — where the launcher icons live).
+User 0 install is not required; the Magisk module and locksettings handle everything else.
 
 ```sh
 adb push dpc/build/outputs/apk/release/dpc-release.apk /data/local/tmp/
 adb shell su -c "pm install -r --user 10 /data/local/tmp/dpc-release.apk"
-adb shell su -c "pm install -r --user 0  /data/local/tmp/dpc-release.apk"
 adb shell su -c "pm grant --user 10 com.fdavids77.wacontainer android.permission.INTERACT_ACROSS_USERS_FULL"
-adb shell su -c "pm grant --user 0  com.fdavids77.wacontainer android.permission.INTERACT_ACROSS_USERS_FULL"
 ```
 
-`ProfileWatcherService` disables the launcher aliases in user 0 automatically on first
-start, so no WA1–WA5 icons appear in the main app drawer — only in Private Space.
-
-Unlock Private Space and tap the WA1–WA5 icons to verify.
+Unlock Private Space and tap WA1–WA5 to verify.
 
 ---
 
-## 6. How the launch works
+## 7. How the launch works
 
-`LaunchWA` uses two strategies, tried in order:
+When a trampoline icon is tapped in Private Space:
 
-**Strategy 1 — reflection:** calls `Context.startActivityAsUser(Intent, UserHandle)` and
-`UserHandle.of(int)` via reflection. Both are hidden API, reachable because the app holds
-`INTERACT_ACROSS_USERS_FULL`. Cross-sibling launch (user 10 → user 13) confirmed working.
+1. **`LaunchWA.onCreate()`** reads `target_user_id` from the alias's own `ActivityInfo`
+   meta-data (`getActivityInfo(componentName, GET_META_DATA)`). Each alias carries its own
+   meta-data, so the correct user id is resolved regardless of which icon was tapped.
 
-**Strategy 2 — root shell fallback** (not yet needed in practice):
+2. **`disableAliasesInUser0()`** hides the WA Container icons from the main app drawer by
+   calling `PackageManager.setComponentEnabledSettingAsUser` (hidden API, accessible via
+   reflection with `INTERACT_ACROSS_USERS_FULL`; falls back to `pm disable --user 0`).
 
-```sh
-su -c "am start --user <id> -n com.whatsapp/com.whatsapp.Main"
-```
+3. **`ensureUserRunning()`** starts the target clone profile:
+   - Runs `am start-user <id>` via `su` (root shell). This is synchronous-ish and waits
+     until the user reaches at least `RUNNING_LOCKED`. **Requires Magisk Multiuser Mode
+     set to allow su in profile users** (see §2a) — without this, exit code is 13 and
+     the profile stays stopped.
+   - Polls `am get-started-user-state <id>` every 500 ms for up to 8 s until the output
+     contains `RUNNING_UNLOCKED`. Proceeds anyway on timeout.
 
-**Why `LauncherApps` is not used:**
-`LauncherApps.getProfiles()` and `LauncherApps.startMainActivity()` are both gated on
-`ROLE_HOME` — the caller must be the active default launcher. This app is not the
-launcher. `startMainActivity()` throws a `SecurityException` with the misleading message:
+4. **Launch:** calls `Context.startActivityAsUser(Intent, UserHandle)` via reflection
+   (hidden API; `INTERACT_ACROSS_USERS_FULL` is the gate). Falls back to
+   `su -c "am start --user <id> -n com.whatsapp/com.whatsapp.Main"`.
 
-```
-Attempt to launch activity without category Intent.CATEGORY_LAUNCHER
-ComponentInfo{com.whatsapp/com.whatsapp.Main}
-```
-
-`com.whatsapp.Main` is a valid `CATEGORY_LAUNCHER` component — the real cause is the
-missing launcher role, not the component. `CrossProfileApps.startMainActivity()` is
-also a dead end: it requires `crossProfile=true` in the target's manifest, which
-WhatsApp does not declare.
-
----
-
-## 7. Troubleshooting
-
-**Filter launch logs:**
-
-```sh
-adb logcat -d -s LaunchWA:*
-```
-
-Plain `grep LaunchWA` also matches framework component-name noise; use `-s LaunchWA:*`
-for clean output.
-
-| Symptom | Likely cause |
-|---------|-------------|
-| Both icons launch same instance | Alias meta-data not resolving — verify `target_user_id` int in the manifest with `aapt2 dump xmltree` |
-| `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | Signature mismatch (debug vs release, or two different debug keys) — verify with `apksigner`, then uninstall before reinstalling |
-| Icon shows generic Android robot | Launcher icon cache stale — reboot, or `pm clear com.google.android.apps.nexuslauncher` (**warning:** resets home screen layout) |
-| `aapt2 dump badging` shows no `launchable-activity` | Expected — `aapt2` does not report `<activity-alias>` entries. Use `aapt2 dump xmltree --file AndroidManifest.xml <apk>` to inspect the merged manifest |
-| Clone profile not created, "too many users" | `fw.max_users` cap hit — `resetprop fw.max_users 5`; see §2 for persistence |
-| Only one CLONE profile allowed | AlwaysCreateUser not active or not scoped to System Framework |
+**Why not `LauncherApps`?**
+`LauncherApps.getProfiles()` and `startMainActivity()` require `ROLE_HOME` — the caller
+must be the active default launcher. `CrossProfileApps.startMainActivity()` requires
+`crossProfile=true` in the target manifest, which WhatsApp does not declare. Neither is
+usable here.
 
 ---
 
-## 8. Why not X
+## 8. Troubleshooting
 
-**APK cloning / repackaging:** repackaging breaks the Play Integrity signature on every
-WhatsApp update; must redo on every update.
+```sh
+# Live launch log:
+adb logcat -s LaunchWA:*
+```
 
-**VirtualApp / BlackBox app-level virtualisation:** guest apps fail Play Integrity checks
-from inside a virtual environment.
-
-**Managed profile (DPC):** creates a "Work" tab in the Pixel launcher exposing every app
-in the profile. Worse: the profile-owner package is permanently protected —
-`pm uninstall` returns `DELETE_FAILED_DEVICE_POLICY_MANAGER`, components inside the
-profile cannot be disabled, and `dpm remove-active-admin` only works on `testOnly`
-builds. A signed release build as profile owner is permanently pinned. Clone profiles
-have none of these constraints.
-
-**Hooking NexusLauncher to render clone-profile apps:** the launcher has internal
-support (`UserType.CLONED`, `BadgeProvider.BadgeType.CLONE`, `ic_clone_app_badge`) but
-something upstream excludes clone profiles from enumeration. Not pursued —
-invisibility is actually desirable here.
-
-**`LauncherApps` / `CrossProfileApps`:** see §6.
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Icons tap but nothing happens; `start-user exit=13` in logcat | Magisk Multiuser Mode is "Device owner only" — su denied in Private Space | Magisk → Settings → Superuser → Multiuser mode → change to include profile users |
+| Device PIN prompted on every launch | Clone-profile lockscreen still enabled | `locksettings set-disabled --user <id> true` for each id |
+| WhatsApp still appears in recents | hideRecent not configured, or not rebooted after setting | Set com.whatsapp to "Hide task" in hideRecent, then reboot |
+| `INSTALL_FAILED_UPDATE_INCOMPATIBLE` when installing dpc | Signature mismatch (debug vs release key) | Uninstall existing: `pm uninstall --user 10 com.fdavids77.wacontainer` |
+| `aapt2 dump badging` shows no launchable-activity | Expected — `aapt2` does not enumerate `<activity-alias>`. Use `aapt2 dump xmltree --file AndroidManifest.xml <apk>` |
+| "Too many users" on `pm create-user` | `fw.max_users` cap | `resetprop fw.max_users 9` (see §3) |
+| Only one CLONE profile allowed | AlwaysCreateUser not active or not scoped to System Framework | |
 
 ---
 
-## 9. Lock-triggered teardown
+## 9. Why not X
 
-When the screen turns off, `ProfileWatcherService` force-stops each managed clone-profile
-user via `su -c "am stop-user -f <id>"`. This mirrors Private Space's behaviour: the
-WhatsApp processes die and their tasks disappear from recents. When an icon is tapped,
-`LaunchWA` runs `am start-user <id>` (3 s timeout) before attempting the launch, so the
-profile is back up before the activity starts.
+**APK cloning / repackaging:** breaks Play Integrity on every WhatsApp update; must redo each time.
 
-**Tradeoff:** stopped instances receive no FCM notifications while the screen is off.
-This matches Private Space and is the intended behaviour.
+**VirtualApp / BlackBox:** guest apps fail Play Integrity from inside a virtual environment.
 
-**How `ProfileWatcherService` works:**
+**Managed profile (DPC / Work profile):** creates a permanent "Work" tab in the Pixel launcher
+exposing every app in the profile. The profile-owner APK is protected — `pm uninstall`
+returns `DELETE_FAILED_DEVICE_POLICY_MANAGER`; `dpm remove-active-admin` only works on
+`testOnly` builds. A release-signed build as profile owner is permanently pinned. Clone
+profiles have none of these constraints.
 
-- Started at boot via `BootReceiver` (BOOT_COMPLETED, user 0) and on every trampoline tap
-  as a recovery mechanism
-- Runs as a foreground service (`foregroundServiceType="specialUse"`, `IMPORTANCE_MIN`
-  notification — appears in the silent section of the drawer)
-- Registers a runtime `ScreenLockReceiver` for `ACTION_SCREEN_OFF` (cannot be
-  manifest-declared on modern Android)
-- Reads managed user IDs from the alias `target_user_id` meta-data at startup with
-  `MATCH_DISABLED_COMPONENTS` — aliases are disabled in user 0 to hide icons, so this
-  flag is required to still enumerate them; without it the scan returns empty and
-  SCREEN_OFF teardown watches zero users
-- When running as user 0, disables the `<activity-alias>` launcher entries via
-  `PackageManager.setComponentEnabledSetting` so icons only appear in Private Space
+**Custom recents watcher (force-stop / am task remove / stop-user on screen lock):**
+force-stopping WhatsApp or running `am task remove` does not reliably clear the recents
+card. The `isVisibleRecentTask` hook is the only approach that works without a custom
+launcher or Shizuku. The Magisk shell-loop watcher was prototyped (`deprecated/waclone-module/`)
+but abandoned once hideRecent was confirmed to solve the recents problem cleanly.
 
-**Stopped-state bootstrap problem:**
-
-A freshly-installed app is in the Android "stopped" state and does not receive
-`BOOT_COMPLETED` until it has been launched at least once. In user 0 the app has no
-launcher icons (they are disabled by the service itself), so it would never leave the
-stopped state on its own.
-
-Fix: every time `LaunchWA` runs in user 10 (Private Space), it calls
-`ProfileWatcherService.ensureRunningInUser0()`, which uses `startForegroundServiceAsUser`
-reflection (falling back to a root shell) to start the user-0 service instance. This pull
-the user-0 package out of stopped state as a side effect. After the first icon tap,
-subsequent boots deliver `BOOT_COMPLETED` normally.
-
-> **Alternative (more robust):** A Magisk `service.sh` root loop polling the lock state
-> avoids app-lifecycle and stopped-state limits entirely:
->
-> ```sh
-> # /data/adb/modules/<module>/service.sh
-> while true; do
->   state=$(dumpsys power | grep 'mHoldingDisplaySuspendBlocker' | tr -d ' ')
->   if [ "$state" = "mHoldingDisplaySuspendBlocker=false" ]; then
->     for uid in 11 12 13 14 15; do
->       am stop-user -f $uid 2>/dev/null
->     done
->   fi
->   sleep 5
-> done &
-> ```
->
-> Use this if the in-app service proves unreliable after system updates.
-
-**Log tags:** `LaunchWA` and `ProfileWatcher`
-
-```sh
-adb logcat -d -s LaunchWA:* ProfileWatcher:*
-```
-
-**Verify teardown:**
-
-```sh
-# Lock the screen, then immediately:
-adb shell su -c "ps -A | grep whatsapp"
-# u11_* through u15_* processes should all be absent
-```
-
-**Verify startup:**
-
-```sh
-# Unlock Private Space, tap any WA icon, then:
-adb shell su -c "ps -A | grep whatsapp"
-# u11_* (WA1), u12_* (WA2), u13_* (WA3), u14_* (WA4), or u15_* (WA5) should appear within ~5 s
-```
+**`LauncherApps` / `CrossProfileApps`:** see §7.
 
 ---
 
-## 10. Magisk module — waclone
+## Repo layout
 
-`waclone.zip` is a flashable Magisk module that runs the teardown loop as a root shell
-process, entirely outside Android's app lifecycle. It is more robust than the in-app
-`ProfileWatcherService` approach: it cannot be killed by the system, is not subject to
-the stopped-state problem, and survives app uninstall.
-
-### Flash
-
-In the Magisk app: **Modules → Install from storage**, select `waclone.zip`, then reboot.
-
-The module installs to `/data/adb/modules/waclone/`. Magisk runs `service.sh` at the
-`late_start service` boot stage, which detaches `watch.sh` into the background.
-
-### How it works
-
-`watch.sh` polls `dumpsys window` for `mDreamingLockscreen` every 2 seconds:
-
-| Value | Action |
-|-------|--------|
-| `true` (screen locked) | `am stop-user -f` for each user in `USERS` |
-| `false` (screen unlocked) | `am start-user` for each user in `USERS` |
-
-The loop waits for `sys.boot_completed=1` plus a 20-second settling delay before
-starting, so it does not race against boot-time user startup.
-
-### Changing which users are managed
-
-Edit the `USERS` variable at the top of `watch.sh`:
-
-```sh
-# In-place on device (no reflash needed — change survives module updates if path is stable):
-adb shell su -c "sed -i 's/^USERS=.*/USERS=\"11 12 13 14 15 16\"/' /data/adb/modules/waclone/watch.sh"
-adb shell su -c "pkill -f watch.sh"   # kill old loop; service.sh on next boot restarts it
-# OR just reboot
-```
-
-Or edit `waclone-module/watch.sh` in this repo, re-run the zip command, and reflash.
-
-### Lock signal caveat — screen saver must be disabled
-
-The lock signal is `mDreamingLockscreen` from `dumpsys window`. When the Android screen
-saver (Daydream) is active, `mShowingDream=true` is set alongside `mDreamingLockscreen=true`,
-making the signal ambiguous — the loop would stop-user while the screen is merely dreaming.
-
-**Disable screen saver:** Settings → Display → Screen saver → Off.
-
-If screen saver must stay on, switch `watch.sh` to the power wakefulness signal:
-
-```sh
-# Replace the STATE= line in watch.sh with:
-STATE="$(dumpsys power | grep -m1 mWakefulness | grep -o 'Awake\|Asleep')"
-# And change comparisons: "true" → "Asleep", "false" → "Awake"
-```
-
-### Verification
-
-```sh
-# After reboot — confirm the loop is running:
-adb shell su -c "ps -A | grep watch.sh"
-
-# Live lock/unlock events (logcat tag waclone):
-adb shell su -c "logcat -s waclone"
-
-# Lock the screen (works over adb while locked):
-adb shell su -c "ps -A | grep whatsapp"
-# u11_* through u15_* should be absent within ~2 s of lock
-```
+| Path | Purpose |
+|------|---------|
+| `dpc/` | LaunchWA trampoline + five launcher aliases + adaptive icon assets. `AdminReceiver` is vestigial from an earlier managed-profile experiment. |
+| `hide/` | LSPosed drawer-filter module. Unused — clone-profile apps are invisible to the launcher by default, so no filtering is needed. |
+| `deprecated/` | Abandoned experiments: `waclone-module/` (Magisk shell-loop watcher, superseded by hideRecent) and `waclone.zip`. |
