@@ -118,6 +118,22 @@
                 android:value="15" />
         </activity-alias>
 
+        <activity-alias
+            android:name=".LaunchWA6"
+            android:targetActivity=".LaunchWA"
+            android:label="WA6"
+            android:icon="@mipmap/ic_wa6"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="target_user_id"
+                android:value="16" />
+        </activity-alias>
+
     </application>
 
 </manifest>
